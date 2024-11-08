@@ -8,6 +8,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.block.BlockPlaceEvent
+import org.bukkit.inventory.meta.components.FoodComponent
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 
@@ -29,12 +30,15 @@ class Alces : JavaPlugin(), Listener {
         val pdc = block.chunk.persistentDataContainer
 
         val itemMeta = event.itemInHand.itemMeta
+
+        val food: String? = itemMeta.food.takeIf { itemMeta.hasFood() }?.let { getFood(it) }
+
         val displayName = itemMeta.displayName()?.let { serializer.serialize(it) }
         val lore = itemMeta.lore()?.mapNotNull { serializer.serialize(it) }?.joinToString("\n")
 
-        if (displayName == null && lore == null) return
+        if (displayName == null && lore == null && food.isNullOrBlank()) return
 
-        pdc.set(key, PersistentDataType.STRING, "${displayName ?: "-"}\n${lore ?: "-"}")
+        pdc.set(key, PersistentDataType.STRING, "${food ?: "-"}\n${displayName ?: "-"}\n${lore ?: "-"}")
     }
 
     @EventHandler
@@ -49,8 +53,9 @@ class Alces : JavaPlugin(), Listener {
         event.isDropItems = false
 
         val lines = data.split("\n")
-        val displayName = lines[0]
-        val lore = lines.drop(1)
+        val food = lines[0]
+        val displayName = lines[1]
+        val lore = lines.drop(2)
 
         val drop = block.drops.first()
         val itemMeta = drop.itemMeta
@@ -60,6 +65,12 @@ class Alces : JavaPlugin(), Listener {
 
         if (lines[1] != "-")
             itemMeta.lore(lore.map { serializer.deserialize(it) })
+
+        if (food != "-") {
+            val foodComponent: FoodComponent = itemMeta.food
+            setFood(foodComponent, food)
+            itemMeta.setFood(foodComponent)
+        }
 
         drop.itemMeta = itemMeta
 
@@ -74,5 +85,21 @@ class Alces : JavaPlugin(), Listener {
     private fun getKey(location: Location): NamespacedKey {
         val key = "${location.world.name}.${location.blockX}.${location.blockY}.${location.blockZ}"
         return NamespacedKey("alces", key)
+    }
+
+    private fun getFood(food: FoodComponent?): String? {
+        return food?.let {
+            "hunger:${it.nutrition}," + "sat:${it.saturation}," + "snack:${it.canAlwaysEat()}"
+        }
+    }
+
+    private fun setFood(foodComponent: FoodComponent, foodProperties: String) {
+        val properties = foodProperties.split(",")
+            .map { it.split(":") }
+            .associate { it[0] to it[1] }
+
+        foodComponent.nutrition = properties["hunger"]?.toIntOrNull() ?: return
+        foodComponent.saturation = properties["sat"]?.toFloatOrNull() ?: return
+        foodComponent.setCanAlwaysEat(properties["snack"]?.toBoolean() ?: return)
     }
 }
